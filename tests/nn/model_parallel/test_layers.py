@@ -31,7 +31,7 @@ from torch.nn.parameter import Parameter
 
 from fairscale.nn.model_parallel import initialize as mpu
 from fairscale.nn.model_parallel import layers
-from fairscale.nn.pipe import MultiProcessPipe
+from fairscale.nn.pipe import Pipe
 from fairscale.utils.testing import dist_init, get_world_sizes, set_random_seed, spawn_for_all_world_sizes, torch_spawn
 
 
@@ -319,7 +319,7 @@ def run_test_pipe(rank, world_size, filename, filename_rpc, skip_dist_init=False
     model_parallel_size = mpu.get_model_parallel_world_size()
     if torch.distributed.get_rank() == 0:
         print(
-            "> testing Sequential + MultiProcessPipe with model parallel size: {}, pipe: {}".format(
+            "> testing Sequential + Pipe with model parallel size: {}, pipe: {}".format(
                 model_parallel_size, pipe_world_size
             )
         )
@@ -431,18 +431,21 @@ def run_test_pipe(rank, world_size, filename, filename_rpc, skip_dist_init=False
     model[2].weight.data = saved_weight_2
 
     worker_map = {i: f"Test{i}" for i in range(torch.distributed.get_world_size())}
+    style = Pipe.MultiProcess  # Pipe.AsyncSchedule
 
     if pipe_world_size == 2:
         print(f"actually doing pipe stuff now")
         assert torch.equal(saved_weight_0, model[0].weight.data)
         assert torch.equal(saved_weight_2, model[2].weight.data)
-        pipe_model = MultiProcessPipe(
+        pipe_model = Pipe(
             model,
             [2, 1],
+            style=style,
             group=pipeline_devices,
             worker_map=worker_map,
             input_device=torch.cuda.current_device(),
             chunks=chunk_size,
+            pipelined_backward=True,
         ).cuda()
         torch.distributed.barrier()
         pipe_rank = torch.distributed.get_rank(group=mpu.get_pipeline_parallel_group())
@@ -504,7 +507,8 @@ def run_test_pipe(rank, world_size, filename, filename_rpc, skip_dist_init=False
             failed = False
             with torch.autograd.profiler.profile() as prof:
                 try:
-                    pipe_model.back_helper(pipe_output)
+                    if style == Pipe.MultiProcess:
+                        pipe_model.back_helper(pipe_output)
                 except Exception as e:
                     failed = True
                     print(f"got {e} while doing backward, deadlock?")
