@@ -29,7 +29,6 @@ class OSS(Optimizer):
     """Wraps an arbitrary :class:`optim.Optimizer <torch.optim.Optimizer>`
     optimizer and shards its state as described by ZeRO_.
     ::
-
         opt = OSS(params, optim=torch.optim.Adam, lr=0.01)
 
     .. _ZeRO: https://arxiv.org/abs/1910.02054
