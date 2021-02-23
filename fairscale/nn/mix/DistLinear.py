@@ -119,7 +119,8 @@ class DistLinear(torch.nn.Module):
             init_method,
             stride=stride,
             return_master_weight=keep_master_weight_for_test,
-            partition_strategy=[self.output_size_per_partition, self.reduce_size_per_partition]
+            partition_size_list=[self.output_size_per_partition, self.reduce_size_per_partition],
+            processor_map=[partition_strategy[1], partition_strategy[2]]
         )
 
         #TODO:

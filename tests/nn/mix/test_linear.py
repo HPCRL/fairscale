@@ -26,6 +26,7 @@ import pytest
 import torch
 from torch import nn
 from torch.distributed import rpc
+import torch.multiprocessing as mp
 import torch.nn.init as init
 from torch.nn.parameter import Parameter
 
@@ -36,8 +37,7 @@ from fairscale.utils.distinit import dist_init
 class IdentityLayer2D(torch.nn.Module):
     def __init__(self, m, n):
         super(IdentityLayer2D, self).__init__()
-        self.weight = Parameter(torch.arange(m*n, dtype=torch.int32).reshape(m, n))
-        torch.nn.init(self.weight)
+        self.weight = Parameter(torch.arange(m*n, dtype=torch.float32).reshape(m, n))
 
     def forward(self):
         return self.weight
@@ -51,13 +51,14 @@ def run_test_single_linear(rank, model_parallel_size, filename, filename_rpc, ba
     model_parallel_size = mpu.get_model_parallel_world_size()
 
     input_size = 4
-    batch_size = 16
-    output_size = 8
+    reduce_size = 2
+    output_size = 4
 
     # Network
-    identity_layer = IdentityLayer2D(batch_size, input_size)
-    linear_layer = DistLinear()
-    loss_weight = torch.ones([batch_size, output_size], dtype=torch.int32)
+    identity_layer = IdentityLayer2D(input_size, reduce_size)
+    linear_layer = DistLinear(input_size, reduce_size, output_size, keep_master_weight_for_test=True,
+                              partition_strategy=[2, 2, 2])
+    loss_weight = torch.ones([input_size, output_size], dtype=torch.float32)
 
     # # Forward
     # input_ = identity_layer()
