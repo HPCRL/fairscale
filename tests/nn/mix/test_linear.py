@@ -28,3 +28,61 @@ from torch import nn
 from torch.distributed import rpc
 import torch.nn.init as init
 from torch.nn.parameter import Parameter
+
+from fairscale.nn.mix import initialize as mpu
+from fairscale.nn.mix import DistLinear
+from fairscale.utils.distinit import dist_init
+
+class IdentityLayer2D(torch.nn.Module):
+    def __init__(self, m, n):
+        super(IdentityLayer2D, self).__init__()
+        self.weight = Parameter(torch.arange(m*n, dtype=torch.int32).reshape(m, n))
+        torch.nn.init(self.weight)
+
+    def forward(self):
+        return self.weight
+
+
+def run_test_single_linear(rank, model_parallel_size, filename, filename_rpc, backend):
+    dist_init(rank, model_parallel_size, filename, filename_rpc, backend)
+    mpu.initialize_model_parallel(model_parallel_size)
+    if torch.distributed.get_rank() == 0:
+        print("> testing ColumnParallelLinear with model parallel size: {}".format(model_parallel_size))
+    model_parallel_size = mpu.get_model_parallel_world_size()
+
+    input_size = 4
+    batch_size = 16
+    output_size = 8
+
+    # Network
+    identity_layer = IdentityLayer2D(batch_size, input_size)
+    linear_layer = DistLinear()
+    loss_weight = torch.ones([batch_size, output_size], dtype=torch.int32)
+
+    # # Forward
+    # input_ = identity_layer()
+    # output = linear_layer(input_)
+    # loss = torch.mul(output, loss_weight).sum()
+    # # Backward
+    # loss.backward()
+    # # Validate
+
+
+
+
+
+    # Reset groups
+    mpu.destroy_model_parallel()
+
+    torch.distributed.barrier()
+    if torch.distributed.get_rank() == 0:
+        print(" >> passed the test :-)")
+
+def test_single_linear_op():
+    WORLD_SIZE = 4
+    _, filename = tempfile.mkstemp()
+    _, filename_rpc = tempfile.mkstemp()
+    mp.spawn(run_test_single_linear, args=(WORLD_SIZE, filename, filename_rpc, "gloo"), nprocs=WORLD_SIZE,
+             join=True)
+
+
