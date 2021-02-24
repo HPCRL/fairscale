@@ -62,17 +62,14 @@ def initialize_affine_weight(
         print("weight_list is \n {}".format(weight_list))
 
     # TODO: replica for case 4 ??
-
     print("partition_size_list {}".format(partition_size_list))
-    print("my index in p_space \n {} {}".format(rank%processor_map[1], rank//processor_map[1]))
+    print("my index in p_space \n {} {}".format(rank % processor_map[1], rank // processor_map[1]))
+    local_weight = weight_list[(rank % processor_map[1]), (rank // processor_map[1]), :, :]
+    print("local_weight_list is {}".format(local_weight))
 
-    local_weight_list = weight_list[(rank%processor_map[1]), (rank//processor_map[1]) ,:,:]
-    print("local_weight_list is {}".format(local_weight_list))
-
-    #TODO: what is it??
-    # with torch.no_grad():
-    #     torch.cat(local_weight_list, dim=1, out=weight)
-    #     print("out is {}".format(weight))
+    with torch.no_grad():
+        weight = local_weight
+        print("out is {}".format(weight))
 
     if return_master_weight:
         return master_weight
