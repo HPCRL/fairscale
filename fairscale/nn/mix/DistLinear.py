@@ -30,7 +30,7 @@ import torch.nn.functional as F
 import torch.nn.init as init
 from torch.nn.parameter import Parameter
 
-from . import get_model_parallel_world_size
+from . import get_model_parallel_world_size, get_model_parallel_group
 from .utils import divide_and_check_no_remainder
 from .weight_init import initialize_affine_weight
 
@@ -70,7 +70,7 @@ class DistLinear(torch.nn.Module):
         stride: int = 1,
         keep_master_weight_for_test: bool = False,
         partition_strategy: List[int] = [1, 1, 1],  #in_dim, out_dim, reduction_dim
-        replica_factor: List[int] = [1, 1, 1],  # in_dim, out_dim, reduction_dim
+        distributor_factor: List[int] = [1, 1, 1],  # in_dim, out_dim, reduction_dim  (1 means copy, n means /n split)
     ) -> None:
         super(DistLinear, self).__init__()
 
@@ -87,9 +87,9 @@ class DistLinear(torch.nn.Module):
         self.parti_out_features = partition_strategy[1]
         self.parti_reduce_features = partition_strategy[2]
 
-        self.replica_in_features = replica_factor[0]
-        self.replica_out_features = replica_factor[1]
-        self.replica_reduce_features = replica_factor[2]
+        self.distributor_in_features = distributor_factor[0]
+        self.distributor_out_features = distributor_factor[1]
+        self.distributor_reduce_features = distributor_factor[2]
 
         # how to assert ??
         # assert (self.parti_in_features*self.parti_out_features) \
@@ -123,40 +123,42 @@ class DistLinear(torch.nn.Module):
             processor_map=[partition_strategy[1], partition_strategy[2]]
         )
 
-        #TODO:
-        #1. how do we partition this kernel [DONE]
-        #2. Initialize weight? randomly ?? [PARTIAL DONE]
-        #3. Input partition inside??
-        #4. Do we need processor layout, I mean how to make it 2D or 3D??
+        #TODO for weight initial:
+        #1. add distributor factor
 
 
-    # def forward(self, input_: torch.Tensor) -> torch.Tensor:  # type:ignore
-    #     # TODO:here we have big issue 2 :: backward() ??
-    #     # sequential loop si??
-    #     # how does it affect backward()?? How does the AutogradMeta for weights/input?
-    #     # The tensor does not always exist in the node, when it move it out?? how we do backward later??
-    #
-    #     # TODO:here we have big issue 1 :: remapping ??
-    #     # 1. how to get data if not in current node???
-    #     # 2. Who to take responsibility for remapping?? (parent node sending?) (self pulling? )
-    #     # 3. minor. how to distribute input if it has not been split \
-    #     # we need input_size_per_partition and reduce_size_per_partition
-    #
-    #     if self.input_is_parallel:
-    #         input_parallel = input_
-    #     else:
-    #         input_parallel = ???
-    #
-    #     #TODO: what id different partition create different input numbers??
-    #
-    #     # Matrix multiply.
-    #     output_parallel = F.linear(input_parallel, self.weight)
-    #     if self.parti_reduce_features != 1:
-    #         # TODO: need to all-reduce
-    #         output_ = None
-    #
-    #     if self.bias is not None:
-    #         output = output_ + self.bias
-    #     else:
-    #         output = output_
-    #     return output
+    def forward(self, input_: torch.Tensor) -> torch.Tensor:  # type:ignore
+
+        # TODO:here we have big issue 1 :: remapping ??
+        # 1. how to get data if not in current node???
+        # 2. Who to take responsibility for remapping?? (parent node sending?) (self pulling? )
+        # 3. minor. how to distribute input if it has not been split \
+        # we need input_size_per_partition and reduce_size_per_partition
+
+        if self.input_is_parallel:
+            input_parallel = input_
+        else:
+            group = get_model_parallel_group()
+            rank = torch.distributed.get_rank(group=group)
+            dim0_size = self.input_size_per_partition
+            dim1_size = self.reduce_size_per_partition
+            # partition large master weight into small piece (partition_size_list[0] x partition_size_list[1])
+            input_list = input_.unfold(0, dim0_size, dim0_size).unfold(1, dim1_size, dim1_size)
+            input_parallel = input_list[(rank % self.parti_reduce_features), (rank // self.parti_reduce_features), :, :]
+
+        if self.parti_reduce_features * self.distributor_reduce_features != 1: #reduction
+            for k in range(0, self.parti_reduce_features * self.distributor_reduce_features):
+                output_parallel = F.linear(input_parallel, self.weight)
+        else:
+            output_parallel = F.linear(input_parallel, self.weight)
+
+        if self.parti_reduce_features != 1:
+            # TODO:
+            # 1. need to all-reduce or all gather
+            output_ = None
+
+        if self.bias is not None:
+            output = output_ + self.bias
+        else:
+            output = output_
+        return output

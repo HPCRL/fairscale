@@ -47,7 +47,7 @@ def run_test_single_linear(rank, model_parallel_size, filename, filename_rpc, ba
     dist_init(rank, model_parallel_size, filename, filename_rpc, backend)
     mpu.initialize_model_parallel(model_parallel_size)
     if torch.distributed.get_rank() == 0:
-        print("> testing ColumnParallelLinear with model parallel size: {}".format(model_parallel_size))
+        print("> model parallel size: {}".format(model_parallel_size))
     model_parallel_size = mpu.get_model_parallel_world_size()
 
     input_size = 4
@@ -60,17 +60,50 @@ def run_test_single_linear(rank, model_parallel_size, filename, filename_rpc, ba
                               partition_strategy=[2, 2, 2])
     loss_weight = torch.ones([input_size, output_size], dtype=torch.float32)
 
-    # # Forward
-    # input_ = identity_layer()
-    # output = linear_layer(input_)
-    # loss = torch.mul(output, loss_weight).sum()
+    # Forward
+    input_ = identity_layer()
+    output = linear_layer(input_)
+    loss = torch.mul(output, loss_weight)
+
+    if rank == 0:
+        print(input_.size())
+        print(input_)
+        print(output.size())
+        print(output)
+        print(loss.size())
+        print(loss)
+
+    # Forward validate
+    if rank == 0:
+        t_a = torch.tensor(torch.arange(input_size*reduce_size, dtype=torch.float32)
+                                      .reshape(input_size, reduce_size))
+
+        t_b = torch.tensor(torch.arange(output_size*reduce_size, dtype=torch.float32)
+                                      .reshape(output_size, reduce_size))
+
+        t_c = torch.matmul(t_a, t_b.t())
+
+        loss_ref = torch.mul(t_c, loss_weight)
+
+        print(t_a.size())
+        print(t_a)
+        print(t_b.size())
+        print(t_b)
+        print(t_c.size())
+        print(t_c)
+        print(loss_ref.size())
+        print(loss_ref)
+
+
+        #assert(input_ == t_a)
+
+
+
+
+
     # # Backward
-    # loss.backward()
+    # loss.sum().backward()
     # # Validate
-
-
-
-
 
     # Reset groups
     mpu.destroy_model_parallel()
